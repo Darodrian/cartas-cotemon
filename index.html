@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cartas Cotemon</title>
+<link rel="icon" href="data:,">
+<script type="application/json" id="cfg">
+{ "supabaseUrl": "https://liuhcwkpuivcletiwpab.supabase.co", "supabaseKey": "sb_publishable_YenbmLGW94t6XHVXgZx0DQ_e2XjL6tC", "overlayKey": "" }
+</script>
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+<!-- Cache de OBS: cambia la version en las dos lineas siguientes para forzar recarga -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.min.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { createBridge } from './js/bridge.js';
+
+const CARD = { w: 2.0, h: 2.0 * 88 / 63, r: 0.12, t: 0.018 };
+const STATE = { card: null, animStart: 0 };
+
+const $ = (id) => document.getElementById(id);
+const loader = new THREE.TextureLoader();
+
+const renderer = new THREE.WebGLRenderer({ canvas: $('scene'), antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 60);
+camera.position.set(2.7, 0.7, 3.3);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.enablePan = false;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 1.5;
+controls.minDistance = 2.0;
+controls.maxDistance = 7.0;
+controls.minPolarAngle = 0.6;
+controls.maxPolarAngle = 1.5;
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+scene.add(new THREE.HemisphereLight(0xcfe0ff, 0x14121a, 0.55));
+const key = new THREE.DirectionalLight(0xffffff, 1.8);
+key.position.set(4, 6, 5);
+scene.add(key);
+
+const rootGroup = new THREE.Group();
+scene.add(rootGroup);
+const magicGroup = new THREE.Group();
+rootGroup.add(magicGroup);
+
+function roundedRectShape(w, h, r) {
+  const s = new THREE.Shape();
+  const x = -w / 2, y = -h / 2;
+  s.moveTo(x + r, y);
+  s.lineTo(x + w - r, y);
+  s.quadraticCurveTo(x + w, y, x + w, y + r);
+  s.lineTo(x + w, y + h - r);
+  s.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  s.lineTo(x + r, y + h);
+  s.quadraticCurveTo(x, y + h, x, y + h - r);
+  s.lineTo(x, y + r);
+  s.quadraticCurveTo(x, y, x + r, y);
+  return s;
+}
+
+function setQuadUV(geo, w, h) {
+  const uv = geo.attributes.uv;
+  const pos = geo.attributes.position;
+  for (let i = 0; i < uv.count; i++) {
+    uv.setXY(i, pos.getX(i) / w + 0.5, pos.getY(i) / h + 0.5);
+  }
+}
+function setQuadUVMirror(geo, w, h) {
+  const uv = geo.attributes.uv;
+  const pos = geo.attributes.position;
+  for (let i = 0; i < uv.count; i++) {
+    uv.setXY(i, 0.5 - pos.getX(i) / w, pos.getY(i) / h + 0.5);
+  }
+}
+
+const cardShape = roundedRectShape(CARD.w, CARD.h, CARD.r);
+
+function makeFrontMaterial(map) {
+  const m = new THREE.MeshBasicMaterial({
+    map: map || null,
+    alphaTest: map ? 0.5 : 0,
+    side: THREE.FrontSide
+  });
+  m.polygonOffset = true;
+  m.polygonOffsetFactor = -1;
+  return m;
+}
+
+function makeBackMaterial(map) {
+  const m = makeFrontMaterial(map);
+  m.side = THREE.DoubleSide;
+  return m;
+}
+
+let backTex = null;
+function loadTexture(url, onReady, onFail) {
+  if (!url) { if (onFail) onFail(); return; }
+  loader.load(url, (tex) => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    onReady(tex);
+  }, undefined, () => { if (onFail) onFail(); });
+}
+
+function buildCard() {
+  disposeCard();
+
+  const frontShapeGeo = new THREE.ShapeGeometry(cardShape, 40);
+  setQuadUV(frontShapeGeo, CARD.w, CARD.h);
+  const backShapeGeo = new THREE.ShapeGeometry(cardShape, 40);
+  setQuadUVMirror(backShapeGeo, CARD.w, CARD.h);
+
+  const bodyGeo = new THREE.ExtrudeGeometry(cardShape, { depth: CARD.t, curveSegments: 40, bevelEnabled: false });
+  const body = new THREE.Mesh(bodyGeo, new THREE.MeshStandardMaterial({ color: 0x141c2e, roughness: 0.35, metalness: 0.2, envMapIntensity: 0.4 }));
+
+  const back = new THREE.Mesh(backShapeGeo, makeBackMaterial(backTex));
+  back.position.z = -0.004;
+
+  const front = new THREE.Mesh(frontShapeGeo, makeFrontMaterial(null));
+  front.position.z = CARD.t + 0.004;
+
+  magicGroup.add(body, back, front);
+  STATE.frontMesh = front;
+  STATE.backMesh = back;
+  STATE.animStart = performance.now();
+}
+
+function disposeCard() {
+  while (magicGroup.children.length) {
+    const c = magicGroup.children.pop();
+    if (c.material) {
+      const map = c.material.map;
+      if (map && map.isTexture && map !== backTex) map.dispose();
+      c.material.dispose();
+    }
+    if (c.geometry) c.geometry.dispose();
+  }
+  STATE.frontMesh = null;
+  STATE.backMesh = null;
+}
+
+async function openDb() {
+  return new Promise((resolve) => {
+    if (!('indexedDB' in window)) return resolve(null);
+    const req = indexedDB.open('cartas', 1);
+    req.onupgradeneeded = () => {
+      const d = req.result;
+      if (!d.objectStoreNames.contains('cards')) d.createObjectStore('cards', { keyPath: 'name' });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => resolve(null);
+  });
+}
+
+function dbPut(name, blob) {
+  return new Promise((resolve) => {
+    if (!db) return resolve();
+    const tx = db.transaction('cards', 'readwrite');
+    tx.objectStore('cards').put({ name, blob });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => resolve();
+  });
+}
+
+function dbAll() {
+  return new Promise((resolve) => {
+    if (!db) return resolve([]);
+    const tx = db.transaction('cards', 'readonly');
+    const req = tx.objectStore('cards').getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => resolve([]);
+  });
+}
+
+let currentUrl = null;
+
+async function applyCard(blob, name) {
+  if (STATE.pendingName === name && STATE.pendingTex) return;
+  STATE.pendingName = name;
+  const url = URL.createObjectURL(blob);
+  loadTexture(url, (tex) => {
+    if (currentUrl) URL.revokeObjectURL(currentUrl);
+    currentUrl = url;
+    if (!STATE.frontMesh) buildCard();
+    const old = STATE.frontMesh.material;
+    STATE.frontMesh.material = makeFrontMaterial(tex);
+    if (old.map && old.map.isTexture) old.map.dispose();
+    old.dispose();
+    STATE.card = name;
+    STATE.animStart = performance.now();
+    STATE.pendingTex = tex;
+    if (name) document.title = 'Cartas Cotemon · ' + name;
+    else document.title = 'Cartas Cotemon';
+  }, () => { /* imagen no cargable */ });
+}
+
+loadTexture('card-back.png', (tex) => {
+  backTex = tex;
+  if (STATE.backMesh) {
+    const old = STATE.backMesh.material;
+    STATE.backMesh.material = makeBackMaterial(tex);
+    if (old.map && old.map.isTexture && old.map !== tex) old.map.dispose();
+    old.dispose();
+  }
+}, () => { /* sin dorso */ });
+
+let spinDir = 1;
+let speed = 1.5;
+let viewTween = null;
+
+function applySpin() {
+  controls.autoRotateSpeed = spinDir * Math.abs(speed);
+}
+
+function syncState(s) {
+  if (!s) return;
+  if (typeof s.dir === 'number') spinDir = s.dir < 0 ? -1 : 1;
+  if (typeof s.speed === 'number') speed = s.speed;
+  if (typeof s.rot === 'boolean') controls.autoRotate = s.rot;
+  applySpin();
+
+  if (typeof s.name === 'string') {
+    if (s.name && (!STATE.card || STATE.card !== s.name)) {
+      dbAll().then((rows) => {
+        const hit = rows.find((r) => r.name === s.name);
+        if (hit) applyCard(hit.blob, hit.name);
+      });
+    }
+  }
+
+  if (typeof s.reset === 'number' && s.reset !== syncState.lastReset) {
+    syncState.lastReset = s.reset;
+    const dist = THREE.MathUtils.clamp(camera.position.length(), 2.4, 7.0);
+    viewTween = {
+      from: camera.position.clone(),
+      fromTarget: controls.target.clone(),
+      to: new THREE.Vector3(0, 0.02, dist),
+      t0: performance.now(), dur: 650
+    };
+  }
+}
+
+const bridge = createBridge();
+bridge.onCard((blob, name) => {
+  dbPut(name, blob);
+  if (STATE.card === name) applyCard(blob, name);
+});
+bridge.onState(syncState);
+bridge.onStatus((status) => {
+  if (status === 'SUBSCRIBED') dbAll().then((rows) => { if (rows.length) applyCard(rows[0].blob, rows[0].name); });
+});
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+function animate(now) {
+  requestAnimationFrame(animate);
+  const t = now / 1000;
+  controls.update();
+  magicGroup.position.y = Math.sin(t * 1.1) * 0.02;
+  if (viewTween) {
+    const k = Math.min(1, (now - viewTween.t0) / viewTween.dur);
+    const e = 1 - Math.pow(1 - k, 3);
+    camera.position.lerpVectors(viewTween.from, viewTween.to, e);
+    controls.target.lerpVectors(viewTween.fromTarget, new THREE.Vector3(0, 0, 0), e);
+    if (k >= 1) viewTween = null;
+  }
+  if (STATE.animStart) {
+    const k = Math.min(1, (now - STATE.animStart) / 500);
+    const ease = 1 - Math.pow(1 - k, 3);
+    magicGroup.scale.setScalar(0.001 + ease * 0.999);
+    if (k >= 1) STATE.animStart = 0;
+  }
+  renderer.render(scene, camera);
+}
+
+const db = await openDb();
+
+buildCard();
+animate(performance.now());
+bridge.connect().catch(() => { /* overlay funciona sin enlace */ });
+</script>
+</body>
+</html>

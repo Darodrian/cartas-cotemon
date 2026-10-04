@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cartas Cotemon · Control</title>
+<link rel="icon" href="data:,">
+<script type="application/json" id="cfg">
+{ "supabaseUrl": "https://liuhcwkpuivcletiwpab.supabase.co", "supabaseKey": "sb_publishable_YenbmLGW94t6XHVXgZx0DQ_e2XjL6tC", "overlayKey": "" }
+</script>
+<style>
+  :root {
+    --panel: rgba(16, 24, 39, 0.72);
+    --line: rgba(255, 255, 255, 0.08);
+    --text: #e8ecf4;
+    --muted: #93a0b8;
+    --accent: #ffd34d;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 22px; min-height: 100vh;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    color: var(--text);
+    background: #0b1018;
+  }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  h2 { margin: 0 0 12px; font-size: 12px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent); }
+  .wrap { display: grid; grid-template-columns: 320px 1fr; gap: 18px; max-width: 1100px; margin: 0 auto; }
+  @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+    padding: 16px 18px; display: flex; flex-direction: column; gap: 14px;
+  }
+  .status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #64748b; flex: 0 0 auto; }
+  .dot.live { background: #34d399; }
+  .dot.busy { background: var(--accent); }
+  .dot.err { background: var(--danger); }
+
+  #drop {
+    border: 2px dashed rgba(255, 211, 77, 0.35); border-radius: 14px;
+    padding: 26px 16px; text-align: center; font-size: 13px; color: var(--muted);
+    cursor: pointer; transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  #drop:hover, #drop.over { border-color: var(--accent); background: rgba(255, 211, 77, 0.08); color: var(--text); }
+  #drop b { color: var(--text); }
+
+  .row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .seg { display: flex; gap: 8px; }
+  .seg button { flex: 1 1 0; }
+  button {
+    padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line);
+    background: rgba(255,255,255,0.06); color: var(--text); font-size: 13px; font-weight: 600;
+    cursor: pointer; font-family: inherit; transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  button:hover:not(:disabled) { background: rgba(255,211,77,0.16); border-color: rgba(255,211,77,0.35); }
+  button:disabled { opacity: 0.35; cursor: default; }
+  .seg button.on { background: rgba(255,211,77,0.18); border-color: rgba(255,211,77,0.45); color: var(--accent); }
+  input[type="range"] { width: 100%; accent-color: var(--accent); }
+  #okey {
+    width: 100%; padding: 9px 12px; border-radius: 10px;
+    border: 1px solid var(--line); background: rgba(0,0,0,0.3); color: var(--text);
+    font-size: 13px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+  #okey:focus { outline: none; border-color: var(--accent); }
+  .keyrow { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+  .keyrow input { flex: 1 1 auto; min-width: 0; }
+  .keyrow button { flex: 0 0 auto; }
+
+  .keybar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    font-size: 12px; color: var(--muted);
+  }
+  .keybar code {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    color: var(--accent); word-break: break-all;
+  }
+  .keybar button { padding: 5px 10px; font-size: 11px; }
+  input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
+  .speed-label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
+  .speed-label b { color: var(--accent); }
+
+  #library { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+  .thumb {
+    position: relative; border: 2px solid transparent; border-radius: 12px; overflow: hidden;
+    cursor: pointer; background: #0f1520; aspect-ratio: 63 / 88;
+  }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb.on { border-color: var(--accent); }
+  .thumb .name {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 5px 7px;
+    font-size: 11px; background: linear-gradient(transparent, rgba(0,0,0,0.85));
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .thumb .kill {
+    position: absolute; top: 5px; right: 5px; width: 24px; height: 24px; padding: 0;
+    border-radius: 50%; background: rgba(0,0,0,0.65); border: 1px solid var(--line); font-size: 14px; line-height: 1;
+  }
+  .thumb .kill:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
+  .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 30px 10px; grid-column: 1 / -1; }
+  .now { font-size: 13px; font-weight: 600; }
+  .now span { color: var(--muted); font-weight: 400; }
+  .note { font-size: 12px; color: var(--muted); line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div style="display:flex; flex-direction:column; gap:18px;">
+    <div>
+      <h1>Cartas Cotemon</h1>
+      <div class="status"><span class="dot" id="dot"></span><span id="status">Sin enlazar</span></div>
+      <div class="keybar" id="keybar" hidden>
+        <span>Clave: <code id="keyval"></code></span>
+        <button type="button" id="btn-copy">Copiar URL de OBS</button>
+        <button type="button" id="btn-regen">Cambiar clave</button>
+      </div>
+    </div>
+
+    <form class="panel" id="okeyform" hidden>
+      <h2>Clave de overlay</h2>
+      <div class="note">Pega aqui la clave que usa tu overlay en la URL de OBS (#key=example)</div>
+      <div class="keyrow">
+        <input type="text" id="okey" placeholder="clave-larga-aleatoria" autocomplete="off" spellcheck="false">
+        <button type="button" id="btn-gen">Generar</button>
+      </div>
+      <div class="keyrow">
+        <button type="submit">Conectar</button>
+      </div>
+    </form>
+
+    <div class="panel">
+      <h2>Cartas</h2>
+      <div id="drop">Arrastra imagenes aqui<br><b>o haz clic</b> para elegir</div>
+      <input type="file" id="file" accept="image/png,image/jpeg" multiple hidden>
+      <div class="row" style="justify-content:space-between">
+        <span class="now">En directo: <span id="live">ninguna</span></span>
+        <span id="count" style="color:var(--muted);font-size:12px"></span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Vista</h2>
+      <div>
+        <div class="row-label" style="font-size:13px;margin-bottom:6px">Giro</div>
+        <div class="seg">
+          <button id="spin-left" type="button" aria-pressed="false">Izquierda</button>
+          <button id="spin-right" type="button" aria-pressed="true">Derecha</button>
+        </div>
+      </div>
+      <label class="row"><input type="checkbox" id="opt-rot" checked> Rotacion automatica</label>
+      <div>
+        <div class="speed-label"><span>Velocidad</span><b id="speed-val">1.5</b></div>
+        <input type="range" id="opt-speed" min="0.1" max="6" step="0.1" value="1.5">
+      </div>
+      <button id="opt-front">Restablecer vista frontal</button>
+      <p class="note">Lo que ves aqui se envia al overlay de OBS con la misma clave. Si el overlay esta abierto, cambiara al instante.</p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Biblioteca</h2>
+    <div id="library"></div>
+  </div>
+</div>
+
+<script type="module">
+import {
+  createBridge, configured, hasKey, savedKey, saveKey,
+  generateKey, validKey, overlayUrl,
+} from './js/bridge.js';
+
+const $ = (id) => document.getElementById(id);
+const MAX_W = 600;
+const QUALITY = 0.88;
+
+const dot = $('dot'), statusEl = $('status');
+const libraryEl = $('library'), liveEl = $('live'), countEl = $('count');
+const drop = $('drop'), fileInput = $('file');
+
+let cards = [];
+let current = null;
+let state = { name: null, dir: 1, rot: true, speed: 1.5, reset: 0 };
+
+try {
+  const saved = JSON.parse(localStorage.getItem('cc_opts_v1')) || {};
+  if (saved.dir) state.dir = saved.dir === 'left' ? -1 : 1;
+  if (saved.speed) state.speed = Number(saved.speed) || 1.5;
+  if (saved.rot === false) state.rot = false;
+} catch (e) { /* sin ajustes guardados */ }
+
+const db = await openDb();
+
+function openDb() {
+  return new Promise((resolve) => {
+    if (!('indexedDB' in window)) return resolve(null);
+    const req = indexedDB.open('cartas', 1);
+    req.onupgradeneeded = () => {
+      const d = req.result;
+      if (!d.objectStoreNames.contains('cards')) d.createObjectStore('cards', { keyPath: 'name' });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => resolve(null);
+  });
+}
+
+function tx(mode, fn) {
+  return new Promise((resolve) => {
+    if (!db) return resolve(null);
+    const t = db.transaction('cards', mode);
+    const out = fn(t.objectStore('cards'));
+    t.oncomplete = () => resolve(out && out.result !== undefined ? out.result : null);
+    t.onerror = () => resolve(null);
+  });
+}
+
+const dbPut = (name, blob) => tx('readwrite', (s) => s.put({ name, blob }));
+const dbDelete = (name) => tx('readwrite', (s) => s.delete(name));
+const dbAll = () => tx('readonly', (s) => s.getAll()) || Promise.resolve([]);
+
+async function resizeImage(file) {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, MAX_W / bmp.width);
+  const w = Math.max(1, Math.round(bmp.width * scale));
+  const h = Math.max(1, Math.round(bmp.height * scale));
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const g = c.getContext('2d');
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, w, h);
+  g.drawImage(bmp, 0, 0, w, h);
+  bmp.close();
+  const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', QUALITY));
+  return blob || file;
+}
+
+function fileKey(file) {
+  return String(file.name || 'card').replace(/\.[^.]+$/, '').replace(/[^\w\-. ]+/g, '_');
+}
+
+function setStatus(kind, text) {
+  dot.className = 'dot' + (kind ? ' ' + kind : '');
+  statusEl.textContent = text;
+}
+
+function render() {
+  libraryEl.textContent = '';
+  if (!cards.length) {
+    const e = document.createElement('div');
+    e.className = 'empty';
+    e.textContent = 'Sin cartas. Arrastra imagenes para empezar.';
+    libraryEl.appendChild(e);
+  } else {
+    for (const card of cards) {
+      const box = document.createElement('div');
+      box.className = 'thumb' + (card.name === current ? ' on' : '');
+      box.title = card.name;
+
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(card.blob);
+      img.alt = card.name;
+      box.appendChild(img);
+
+      const label = document.createElement('div');
+      label.className = 'name';
+      label.textContent = card.name;
+      box.appendChild(label);
+
+      const kill = document.createElement('button');
+      kill.className = 'kill';
+      kill.type = 'button';
+      kill.textContent = '×';
+      kill.title = 'Eliminar carta';
+      kill.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        cards = cards.filter((c) => c.name !== card.name);
+        await dbDelete(card.name);
+        if (current === card.name) current = null;
+        render();
+      });
+      box.appendChild(kill);
+
+      box.addEventListener('click', () => {
+        current = card.name;
+        state.name = card.name;
+        push();
+        render();
+      });
+
+      libraryEl.appendChild(box);
+    }
+  }
+  liveEl.textContent = current || 'ninguna';
+  countEl.textContent = cards.length ? cards.length + (cards.length === 1 ? ' carta' : ' cartas') : '';
+}
+
+function push() {
+  state.name = current;
+  bridge.sendState(state);
+  saveOpts();
+}
+
+function saveOpts() {
+  try {
+    localStorage.setItem('cc_opts_v1', JSON.stringify({
+      rot: $('opt-rot').checked,
+      speed: $('opt-speed').value,
+      dir: state.dir < 0 ? 'left' : 'right'
+    }));
+  } catch (e) { /* modo privado */ }
+}
+
+async function ingest(files) {
+  for (const file of files) {
+    if (!/^image\//.test(file.type)) continue;
+    let name = fileKey(file);
+    let n = 2;
+    while (cards.some((c) => c.name === name)) name = fileKey(file) + '-' + n++;
+    const blob = await resizeImage(file);
+    cards.push({ name, blob });
+    await dbPut(name, blob);
+    setStatus('busy', 'Subiendo ' + name + '...');
+    try {
+      await bridge.sendCard(blob, name);
+    } catch (e) {
+      setStatus('err', 'Error al enviar ' + name);
+    }
+  }
+  render();
+  if (!current && cards.length) {
+    current = cards[0].name;
+    push();
+  }
+}
+
+drop.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  ingest(Array.from(fileInput.files || []));
+  fileInput.value = '';
+});
+['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => {
+  e.preventDefault();
+  drop.classList.add('over');
+}));
+['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => {
+  e.preventDefault();
+  drop.classList.remove('over');
+}));
+drop.addEventListener('drop', (e) => {
+  ingest(Array.from(e.dataTransfer.files || []));
+});
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => e.preventDefault());
+
+function renderSpinDir() {
+  $('spin-left').classList.toggle('on', state.dir < 0);
+  $('spin-right').classList.toggle('on', state.dir > 0);
+  $('spin-left').setAttribute('aria-pressed', String(state.dir < 0));
+  $('spin-right').setAttribute('aria-pressed', String(state.dir > 0));
+}
+
+$('spin-left').addEventListener('click', () => { state.dir = -1; renderSpinDir(); push(); });
+$('spin-right').addEventListener('click', () => { state.dir = 1; renderSpinDir(); push(); });
+$('opt-rot').addEventListener('change', () => {
+  state.rot = $('opt-rot').checked;
+  $('opt-speed').disabled = !state.rot;
+  push();
+});
+$('opt-speed').addEventListener('input', () => {
+  state.speed = Number($('opt-speed').value);
+  $('speed-val').textContent = $('opt-speed').value;
+  push();
+});
+$('opt-front').addEventListener('click', () => { state.reset = Date.now(); push(); });
+
+$('opt-rot').checked = state.rot;
+$('opt-speed').value = String(state.speed);
+$('opt-speed').disabled = !state.rot;
+$('speed-val').textContent = String(state.speed);
+renderSpinDir();
+
+const bridge = createBridge();
+bridge.onStatus((s) => {
+  if (s === 'SUBSCRIBED') setStatus('live', 'Enlace activo');
+  else if (s === 'CHANNEL_ERROR') setStatus('err', 'Clave rechazada');
+  else if (s === 'TIMED_OUT') setStatus('err', 'Sin respuesta');
+  else if (s === 'CLOSED') setStatus('', 'Desconectado');
+  else setStatus('busy', 'Conectando...');
+});
+
+
+
+const okeyForm = $('okeyform'), okeyInput = $('okey');
+const keybar = $('keybar'), keyval = $('keyval');
+
+function showKeyBar() {
+  const k = okeyInput.value.trim();
+  keyval.textContent = k;
+  keybar.hidden = !k;
+}
+
+async function start() {
+  okeyForm.hidden = true;
+  if (!configured()) {
+    setStatus('err', 'Falta supabaseUrl o supabaseKey en la configuracion');
+    okeyForm.hidden = false;
+    return;
+  }
+  try {
+    await bridge.connect();
+    for (const c of cards) {
+      await bridge.sendCard(c.blob, c.name);
+    }
+    if (cards.length && !current) current = cards[0].name;
+    push();
+  } catch (err) {
+    setStatus('err', 'No se pudo conectar. Revisa la URL y la clave del proyecto.');
+  }
+  showKeyBar();
+}
+
+$('btn-gen').addEventListener('click', () => {
+  okeyInput.value = generateKey();
+  okeyInput.focus();
+});
+
+okeyInput.addEventListener('input', showKeyBar);
+
+okeyForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const v = okeyInput.value.trim();
+  if (!v) {
+    setStatus('err', 'Genera una clave o pega la que usa tu overlay');
+    return;
+  }
+  if (!validKey(v)) {
+    setStatus('err', 'Solo letras, digitos y los signos . _ - =');
+    return;
+  }
+  saveKey(v);
+  await start();
+});
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (err) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e2) { /* sin portapapeles */ }
+    ta.remove();
+  }
+}
+
+$('btn-copy').addEventListener('click', async () => {
+  const url = overlayUrl(okeyInput.value.trim());
+  await copyText(url);
+  setStatus('live', 'URL de OBS copiada');
+});
+
+$('btn-regen').addEventListener('click', async () => {
+  const ok = confirm(
+    'Se generara una clave nueva.\n\n' +
+    'El overlay dejara de recibir hasta que pegues la nueva URL en OBS ' +
+    '(Fuente Browser > URL). Tendras que copiarla de nuevo.'
+  );
+  if (!ok) return;
+  const v = generateKey();
+  saveKey(v);
+  okeyInput.value = v;
+  showKeyBar();
+  try {
+    await bridge.reload();
+    for (const c of cards) {
+      await bridge.sendCard(c.blob, c.name);
+    }
+    push();
+    await copyText(overlayUrl(v));
+    setStatus('live', 'Clave nueva generada y URL copiada. Actualiza OBS.');
+  } catch (err) {
+    setStatus('err', 'No se pudo reconectar con la clave nueva');
+  }
+});
+
+const rows = await dbAll();
+if (rows && rows.length) {
+  cards = rows.map((r) => ({ name: r.name, blob: r.blob })).sort((a, b) => a.name.localeCompare(b.name));
+}
+render();
+
+if (hasKey()) {
+  okeyInput.value = savedKey();
+  await start();
+} else {
+  okeyForm.hidden = false;
+  okeyInput.focus();
+}
+</script>
+</body>
+</html>
