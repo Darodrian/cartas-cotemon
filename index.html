@@ -277,7 +277,11 @@ bridge.onCard((blob, name) => {
 });
 bridge.onState(syncState);
 bridge.onStatus((status) => {
-  if (status === 'SUBSCRIBED') dbAll().then((rows) => { if (rows.length) applyCard(rows[0].blob, rows[0].name); });
+  if (status === 'SUBSCRIBED') {
+    // Pide la biblioteca: si el panel ya estaba conectado, se la reenvia.
+    bridge.requestCards();
+    dbAll().then((rows) => { if (rows.length) applyCard(rows[0].blob, rows[0].name); });
+  }
 });
 
 window.addEventListener('resize', () => {

@@ -1,4 +1,6 @@
-const SUPA_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+// Fijado a una version concreta: el soporte de payloads binarios llega en la
+// 2.91.0 y en versiones anteriores se descartan en silencio.
+const SUPA_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm';
 
 let cfg = {};
 try {
@@ -46,12 +48,6 @@ function generateKey(len = 24) {
   return out.join('');
 }
 
-const KEY_OK = /^[A-Za-z0-9._=-]+$/;
-
-function validKey(v) {
-  return KEY_OK.test(String(v || ''));
-}
-
 function overlayUrl(key) {
   const base = new URL('index.html', location.href);
   base.hash = 'key=' + encodeURIComponent(key);
@@ -76,6 +72,24 @@ async function getClient() {
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
+const SEND_TIMEOUT = 12000;
+
+function withTimeout(promise, ms) {
+  let timer;
+  const guard = new Promise((resolve) => { timer = setTimeout(() => resolve('timeout'), ms); });
+  return Promise.race([
+    promise.then(() => 'ok', () => 'error'),
+    guard,
+  ]).finally(() => clearTimeout(timer));
+}
+
+// Acepta ArrayBuffer o cualquier ArrayBufferView.
+function toBytes(v) {
+  if (v instanceof ArrayBuffer) return new Uint8Array(v);
+  if (ArrayBuffer.isView(v)) return new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+  return null;
+}
+
 async function frameCard(blob, name) {
   const nameBytes = enc.encode(name);
   const imageBytes = new Uint8Array(await blob.arrayBuffer());
@@ -87,7 +101,7 @@ async function frameCard(blob, name) {
 }
 
 export function createBridge() {
-  const handlers = { status: [], card: [], state: [] };
+  const handlers = { status: [], card: [], state: [], needCards: [] };
   let channel = null;
 
   async function connect() {
@@ -98,12 +112,24 @@ export function createBridge() {
       handlers.state.forEach((h) => h(msg.payload));
     });
 
-    channel.on('broadcast', { event: 'card' }, (payload) => {
-      const buf = payload instanceof ArrayBuffer ? new Uint8Array(payload) : payload;
-      const len = new DataView(buf.buffer, buf.byteOffset).getUint32(0, true);
-      const name = dec.decode(buf.subarray(4, 4 + len));
-      const data = buf.subarray(4 + len);
-      handlers.card.forEach((h) => h(new Blob([data], { type: 'image/jpeg' }), name));
+    // El callback recibe el sobre {type, event, payload}; el binario va dentro.
+    channel.on('broadcast', { event: 'card' }, (msg) => {
+      try {
+        const buf = toBytes(msg && msg.payload);
+        if (!buf) throw new Error('payload no binario');
+        const len = new DataView(buf.buffer, buf.byteOffset, buf.byteLength).getUint32(0, true);
+        if (4 + len > buf.byteLength) throw new Error('trama incompleta');
+        const name = dec.decode(buf.subarray(4, 4 + len));
+        const data = buf.subarray(4 + len);
+        handlers.card.forEach((h) => h(new Blob([data], { type: 'image/jpeg' }), name));
+      } catch (e) {
+        console.error('bridge: trama de carta invalida', e);
+      }
+    });
+
+    // El overlay avisa al entrar para que el panel le reenvie la biblioteca.
+    channel.on('broadcast', { event: 'need-cards' }, (msg) => {
+      handlers.needCards.forEach((h) => h(msg.payload));
     });
 
     return new Promise((resolve) => {
@@ -126,22 +152,29 @@ export function createBridge() {
       if (!channel) return;
       channel.send({ type: 'broadcast', event: 'state', payload: state });
     },
+    requestCards() {
+      if (!channel) return;
+      channel.send({ type: 'broadcast', event: 'need-cards', payload: { at: Date.now() } });
+    },
     async sendCard(blob, name) {
       if (!channel) return;
       const framed = await frameCard(blob, name);
-      await channel.send({
-        type: 'broadcast',
-        event: 'card',
-        payload: framed.buffer
-      });
+      const sent = await withTimeout(
+        channel.send({ type: 'broadcast', event: 'card', payload: framed.buffer }),
+        SEND_TIMEOUT,
+      );
+      if (sent === 'timeout') {
+        throw new Error('el envio de ' + name + ' no respondio');
+      }
     },
     onStatus(fn) { handlers.status.push(fn); },
     onCard(fn) { handlers.card.push(fn); },
-    onState(fn) { handlers.state.push(fn); }
+    onState(fn) { handlers.state.push(fn); },
+    onNeedCards(fn) { handlers.needCards.push(fn); },
   };
 }
 
 export {
   configured, hasKey, channelName, savedKey, saveKey,
-  generateKey, validKey, overlayUrl, cfg,
+  generateKey, overlayUrl, cfg,
 };

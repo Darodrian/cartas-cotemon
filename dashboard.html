@@ -58,25 +58,16 @@
   button:disabled { opacity: 0.35; cursor: default; }
   .seg button.on { background: rgba(255,211,77,0.18); border-color: rgba(255,211,77,0.45); color: var(--accent); }
   input[type="range"] { width: 100%; accent-color: var(--accent); }
-  #okey {
-    width: 100%; padding: 9px 12px; border-radius: 10px;
-    border: 1px solid var(--line); background: rgba(0,0,0,0.3); color: var(--text);
-    font-size: 13px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  }
-  #okey:focus { outline: none; border-color: var(--accent); }
-  .keyrow { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
-  .keyrow input { flex: 1 1 auto; min-width: 0; }
-  .keyrow button { flex: 0 0 auto; }
-
   .keybar {
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    font-size: 12px; color: var(--muted);
+    font-size: 12px; color: var(--muted); margin-top: 10px;
   }
   .keybar code {
     font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
     color: var(--accent); word-break: break-all;
   }
   .keybar button { padding: 5px 10px; font-size: 11px; }
+  .keybar .none { font-style: italic; }
   input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
   .speed-label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
   .speed-label b { color: var(--accent); }
@@ -109,25 +100,13 @@
   <div style="display:flex; flex-direction:column; gap:18px;">
     <div>
       <h1>Cartas Cotemon</h1>
-      <div class="status"><span class="dot" id="dot"></span><span id="status">Sin enlazar</span></div>
-      <div class="keybar" id="keybar" hidden>
-        <span>Clave: <code id="keyval"></code></span>
-        <button type="button" id="btn-copy">Copiar URL de OBS</button>
-        <button type="button" id="btn-regen">Cambiar clave</button>
+      <div class="status"><span class="dot" id="dot"></span><span id="status">Sin clave</span></div>
+      <div class="keybar">
+        <span id="keylabel">Clave: <em class="none" id="keynone">sin generar</em><code id="keyval" hidden></code></span>
+        <button type="button" id="btn-copy" disabled>Copiar URL de OBS</button>
+        <button type="button" id="btn-key">Generar clave</button>
       </div>
     </div>
-
-    <form class="panel" id="okeyform" hidden>
-      <h2>Clave de overlay</h2>
-      <div class="note">Pega aqui la clave que usa tu overlay en la URL de OBS (#key=example)</div>
-      <div class="keyrow">
-        <input type="text" id="okey" placeholder="clave-larga-aleatoria" autocomplete="off" spellcheck="false">
-        <button type="button" id="btn-gen">Generar</button>
-      </div>
-      <div class="keyrow">
-        <button type="submit">Conectar</button>
-      </div>
-    </form>
 
     <div class="panel">
       <h2>Cartas</h2>
@@ -167,7 +146,7 @@
 <script type="module">
 import {
   createBridge, configured, hasKey, savedKey, saveKey,
-  generateKey, validKey, overlayUrl,
+  generateKey, overlayUrl,
 } from './js/bridge.js';
 
 const $ = (id) => document.getElementById(id);
@@ -312,6 +291,7 @@ function saveOpts() {
 }
 
 async function ingest(files) {
+  let failed = 0;
   for (const file of files) {
     if (!/^image\//.test(file.type)) continue;
     let name = fileKey(file);
@@ -324,7 +304,8 @@ async function ingest(files) {
     try {
       await bridge.sendCard(blob, name);
     } catch (e) {
-      setStatus('err', 'Error al enviar ' + name);
+      failed++;
+      setStatus('err', 'No se pudo enviar ' + name);
     }
   }
   render();
@@ -332,6 +313,7 @@ async function ingest(files) {
     current = cards[0].name;
     push();
   }
+  if (!failed) setStatus('live', 'Enlace activo');
 }
 
 drop.addEventListener('click', () => fileInput.click());
@@ -391,56 +373,49 @@ bridge.onStatus((s) => {
 
 
 
-const okeyForm = $('okeyform'), okeyInput = $('okey');
-const keybar = $('keybar'), keyval = $('keyval');
+// La clave llega en el hash cuando el panel se abre desde la URL copiada.
+// Se adopta y se limpia el hash: a partir de aqui manda localStorage, asi
+// "Generar clave" no se queda pegada a la clave antigua del hash.
+(function adoptHashKey() {
+  const fromHash = new URLSearchParams(location.hash.slice(1)).get('key');
+  if (!fromHash) return;
+  saveKey(fromHash);
+  history.replaceState(null, '', location.pathname + location.search);
+})();
 
-function showKeyBar() {
-  const k = okeyInput.value.trim();
-  keyval.textContent = k;
-  keybar.hidden = !k;
+const keyVal = $('keyval'), keyNone = $('keynone');
+const btnKey = $('btn-key'), btnCopy = $('btn-copy');
+
+function showKey(key) {
+  const k = String(key || '').trim();
+  keyVal.textContent = k;
+  keyVal.hidden = !k;
+  keyNone.hidden = !!k;
+  btnCopy.disabled = !k;
+  btnKey.textContent = k ? 'Cambiar clave' : 'Generar clave';
+}
+
+async function pushLibrary() {
+  for (const c of cards) {
+    await bridge.sendCard(c.blob, c.name);
+  }
 }
 
 async function start() {
-  okeyForm.hidden = true;
   if (!configured()) {
     setStatus('err', 'Falta supabaseUrl o supabaseKey en la configuracion');
-    okeyForm.hidden = false;
     return;
   }
   try {
     await bridge.connect();
-    for (const c of cards) {
-      await bridge.sendCard(c.blob, c.name);
-    }
+    await pushLibrary();
     if (cards.length && !current) current = cards[0].name;
     push();
+    setStatus('live', 'Enlace activo');
   } catch (err) {
     setStatus('err', 'No se pudo conectar. Revisa la URL y la clave del proyecto.');
   }
-  showKeyBar();
 }
-
-$('btn-gen').addEventListener('click', () => {
-  okeyInput.value = generateKey();
-  okeyInput.focus();
-});
-
-okeyInput.addEventListener('input', showKeyBar);
-
-okeyForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const v = okeyInput.value.trim();
-  if (!v) {
-    setStatus('err', 'Genera una clave o pega la que usa tu overlay');
-    return;
-  }
-  if (!validKey(v)) {
-    setStatus('err', 'Solo letras, digitos y los signos . _ - =');
-    return;
-  }
-  saveKey(v);
-  await start();
-});
 
 async function copyText(text) {
   try {
@@ -457,34 +432,42 @@ async function copyText(text) {
   }
 }
 
-$('btn-copy').addEventListener('click', async () => {
-  const url = overlayUrl(okeyInput.value.trim());
-  await copyText(url);
+btnCopy.addEventListener('click', async () => {
+  await copyText(overlayUrl(savedKey()));
   setStatus('live', 'URL de OBS copiada');
 });
 
-$('btn-regen').addEventListener('click', async () => {
-  const ok = confirm(
-    'Se generara una clave nueva.\n\n' +
-    'El overlay dejara de recibir hasta que pegues la nueva URL en OBS ' +
-    '(Fuente Browser > URL). Tendras que copiarla de nuevo.'
-  );
-  if (!ok) return;
-  const v = generateKey();
-  saveKey(v);
-  okeyInput.value = v;
-  showKeyBar();
+btnKey.addEventListener('click', async () => {
+  const had = !!savedKey();
+  const msg = had
+    ? 'Se generara una clave nueva.\n\n' +
+      'El overlay dejara de recibir hasta que pegues la nueva URL en OBS ' +
+      '(Fuente Browser > URL). Tendras que copiarla de nuevo.'
+    : 'Se generara una clave para tu overlay.\n\n' +
+      'Despues copiala con "Copiar URL de OBS" y pegala en la fuente Browser de OBS.';
+  if (!confirm(msg)) return;
+
+  const key = generateKey();
+  saveKey(key);
+  showKey(key);
   try {
     await bridge.reload();
-    for (const c of cards) {
-      await bridge.sendCard(c.blob, c.name);
-    }
+    await pushLibrary();
     push();
-    await copyText(overlayUrl(v));
-    setStatus('live', 'Clave nueva generada y URL copiada. Actualiza OBS.');
+    await copyText(overlayUrl(key));
+    setStatus('live', had
+      ? 'Clave nueva generada y URL copiada. Actualiza OBS.'
+      : 'Clave generada y URL copiada. Pegala en OBS.');
   } catch (err) {
-    setStatus('err', 'No se pudo reconectar con la clave nueva');
+    setStatus('err', 'No se pudo conectar con la clave nueva');
   }
+});
+
+// Un overlay que entra despues pide la biblioteca para no quedarse vacio.
+bridge.onNeedCards(async () => {
+  if (!bridge.isConnected()) return;
+  await pushLibrary();
+  push();
 });
 
 const rows = await dbAll();
@@ -493,12 +476,11 @@ if (rows && rows.length) {
 }
 render();
 
+showKey(savedKey());
 if (hasKey()) {
-  okeyInput.value = savedKey();
   await start();
 } else {
-  okeyForm.hidden = false;
-  okeyInput.focus();
+  setStatus('', 'Sin clave: genera una para empezar');
 }
 </script>
 </body>
