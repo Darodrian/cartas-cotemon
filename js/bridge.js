@@ -101,7 +101,7 @@ async function frameCard(blob, name) {
 }
 
 export function createBridge() {
-  const handlers = { status: [], card: [], state: [], needCards: [] };
+  const handlers = { status: [], card: [], state: [], needCards: [], library: [] };
   let channel = null;
 
   async function connect() {
@@ -132,6 +132,11 @@ export function createBridge() {
       handlers.needCards.forEach((h) => h(msg.payload));
     });
 
+    // El panel envia los nombres que existen; el overlay descarta el resto.
+    channel.on('broadcast', { event: 'library' }, (msg) => {
+      handlers.library.forEach((h) => h(msg.payload));
+    });
+
     return new Promise((resolve) => {
       channel.subscribe((status) => {
         handlers.status.forEach((h) => h(status));
@@ -156,6 +161,10 @@ export function createBridge() {
       if (!channel) return;
       channel.send({ type: 'broadcast', event: 'need-cards', payload: { at: Date.now() } });
     },
+    sendLibrary(names) {
+      if (!channel) return;
+      channel.send({ type: 'broadcast', event: 'library', payload: { names: names || [] } });
+    },
     async sendCard(blob, name) {
       if (!channel) return;
       const framed = await frameCard(blob, name);
@@ -171,6 +180,7 @@ export function createBridge() {
     onCard(fn) { handlers.card.push(fn); },
     onState(fn) { handlers.state.push(fn); },
     onNeedCards(fn) { handlers.needCards.push(fn); },
+    onLibrary(fn) { handlers.library.push(fn); },
   };
 }
 

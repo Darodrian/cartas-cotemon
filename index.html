@@ -202,6 +202,16 @@ function dbAll() {
   });
 }
 
+function dbDelete(name) {
+  return new Promise((resolve) => {
+    if (!db) return resolve();
+    const tx = db.transaction('cards', 'readwrite');
+    tx.objectStore('cards').delete(name);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => resolve();
+  });
+}
+
 let currentUrl = null;
 
 async function applyCard(blob, name) {
@@ -222,6 +232,24 @@ async function applyCard(blob, name) {
     if (name) document.title = 'Cartas Cotemon · ' + name;
     else document.title = 'Cartas Cotemon';
   }, () => { /* imagen no cargable */ });
+}
+
+// Vuelve al aspecto de reposo: la misma cara vacia que antes de elegir carta.
+function clearCard() {
+  STATE.pendingName = null;
+  STATE.pendingTex = null;
+  if (currentUrl) {
+    URL.revokeObjectURL(currentUrl);
+    currentUrl = null;
+  }
+  if (STATE.frontMesh) {
+    const old = STATE.frontMesh.material;
+    STATE.frontMesh.material = makeFrontMaterial(null);
+    if (old.map && old.map.isTexture) old.map.dispose();
+    old.dispose();
+  }
+  STATE.card = '';
+  document.title = 'Cartas Cotemon';
 }
 
 loadTexture('card-back.png', (tex) => {
@@ -250,7 +278,9 @@ function syncState(s) {
   applySpin();
 
   if (typeof s.name === 'string') {
-    if (s.name && (!STATE.card || STATE.card !== s.name)) {
+    if (!s.name) {
+      if (STATE.card) clearCard();
+    } else if (STATE.card !== s.name) {
       dbAll().then((rows) => {
         const hit = rows.find((r) => r.name === s.name);
         if (hit) applyCard(hit.blob, hit.name);
@@ -275,13 +305,20 @@ bridge.onCard((blob, name) => {
   dbPut(name, blob);
   if (STATE.card === name) applyCard(blob, name);
 });
+// El panel manda la lista autoritativa: lo que no esta, se borra de aqui.
+bridge.onLibrary(async (p) => {
+  const names = (p && Array.isArray(p.names)) ? p.names : [];
+  const rows = await dbAll();
+  for (const r of rows) {
+    if (!names.includes(r.name)) await dbDelete(r.name);
+  }
+  if (STATE.card && !names.includes(STATE.card)) clearCard();
+});
 bridge.onState(syncState);
 bridge.onStatus((status) => {
-  if (status === 'SUBSCRIBED') {
-    // Pide la biblioteca: si el panel ya estaba conectado, se la reenvia.
-    bridge.requestCards();
-    dbAll().then((rows) => { if (rows.length) applyCard(rows[0].blob, rows[0].name); });
-  }
+  // Pide la biblioteca: si el panel ya estaba conectado, se la reenvia con
+  // los nombres que existen, y el overlay descarta lo que se borro.
+  if (status === 'SUBSCRIBED') bridge.requestCards();
 });
 
 window.addEventListener('resize', () => {

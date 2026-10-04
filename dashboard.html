@@ -159,7 +159,7 @@ const drop = $('drop'), fileInput = $('file');
 
 let cards = [];
 let current = null;
-let state = { name: null, dir: 1, rot: true, speed: 1.5, reset: 0 };
+let state = { name: '', dir: 1, rot: true, speed: 1.5, reset: 0 };
 
 try {
   const saved = JSON.parse(localStorage.getItem('cc_opts_v1')) || {};
@@ -257,12 +257,15 @@ function render() {
         await dbDelete(card.name);
         if (current === card.name) current = null;
         render();
+        // Sin esto el overlay se queda con la ultima carta puesta.
+        bridge.sendLibrary(cards.map((c) => c.name));
+        push();
       });
       box.appendChild(kill);
 
       box.addEventListener('click', () => {
-        current = card.name;
-        state.name = card.name;
+        // Clic en la carta ya activa la deselecciona.
+        current = current === card.name ? null : card.name;
         push();
         render();
       });
@@ -275,7 +278,7 @@ function render() {
 }
 
 function push() {
-  state.name = current;
+  state.name = current || '';
   bridge.sendState(state);
   saveOpts();
 }
@@ -396,6 +399,9 @@ function showKey(key) {
 }
 
 async function pushLibrary() {
+  // Los nombres van primero: el overlay borra de su cache lo que no exista
+  // y despues llegan los bytes de las que si.
+  bridge.sendLibrary(cards.map((c) => c.name));
   for (const c of cards) {
     await bridge.sendCard(c.blob, c.name);
   }
